@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>ML-Powered Product Search</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        :root {
+            --bg: #f4f6f8;
+            --card-bg: #ffffff;
+            --text: #1f2937;
+            --primary: #3b82f6;
+            --muted: #6b7280;
+            --border: #e5e7eb;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            font-family: system-ui, sans-serif;
+            color: var(--text);
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        header { text-align: center; margin-bottom: 30px; }
+        h1 { font-size: 2.5rem; color: var(--primary); margin-bottom: 5px; }
+        .search-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        #searchInput {
+            flex-grow: 1;
+            padding: 12px 15px;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        #searchInput:focus { border-color: var(--primary); }
+        .search-btn {
+            padding: 12px 25px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+        .search-btn:hover { background: #2563eb; }
+        .search-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        .product-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+        }
+        .card:hover { transform: translateY(-3px); }
+        .card h2 { font-size: 1.25rem; margin: 0 0 5px; color: var(--primary); }
+        .card p { font-size: 0.9rem; color: var(--muted); margin: 0 0 10px; line-height: 1.4; }
+        .card .price { font-size: 1.1rem; font-weight: 700; color: var(--text); margin-top: 10px; }
+        .card .category {
+            display: inline-block;
+            background: #eef2ff;
+            color: #4f46e5;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .card .score {
+            font-size: 0.8rem;
+            color: #f59e0b;
+            margin-left: 10px;
+        }
+        #message {
+            text-align: center;
+            padding: 20px;
+            font-size: 1.1rem;
+            color: var(--muted);
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Product Catalog</h1>
+            <p>Total Products: <span id="totalCount">...</span></p>
+        </header>
+
+        <div class="search-bar">
+            <input type="text" id="searchInput" placeholder="Search for 'electric scooter', 'dark roast coffee', or 'tent'..." />
+            <button class="search-btn" id="searchBtn">Search</button>
+        </div>
+        
+        <div id="message">Loading initial products...</div>
+        <div class="product-grid" id="productGrid">
+            </div>
+
+        <div class="footer">
+            <p>Simple ML Search Demo (TF-IDF Vectorization) powered by Flask.</p>
+            <p>Try searching for a single word like "gaming" or a phrase like "camping tent".</p>
+        </div>
+    </div>
+
+    <script>
+        const BASE_URL = "https://315917d3abc28f.lhr.life/api";
+
+        const productGrid = document.getElementById("productGrid");
+        const searchInput = document.getElementById("searchInput");
+        const searchBtn = document.getElementById("searchBtn");
+        const messageEl = document.getElementById("message");
+        const totalCountEl = document.getElementById("totalCount");
+
+        // --- UI Rendering ---
+
+        function renderCard(product) {
+            const card = document.createElement('div');
+            card.className = 'card';
+            
+            // Format score if available
+            const scoreHtml = product.score 
+                ? `<span class="score">Relevance: ${product.score}</span>` 
+                : '';
+
+            card.innerHTML = `
+                <h2>${product.name}</h2>
+                <span class="category">${product.category}</span>
+                ${scoreHtml}
+                <p>${product.description}</p>
+                <div class="price">$${product.price.toFixed(2)}</div>
+            `;
+            productGrid.appendChild(card);
+        }
+
+        function renderProducts(products, isSearch = false) {
+            productGrid.innerHTML = '';
+            if (products.length === 0) {
+                messageEl.textContent = isSearch 
+                    ? "No matching products found. Try a different query."
+                    : "No products loaded from the server.";
+                messageEl.style.display = 'block';
+                return;
+            }
+
+            messageEl.style.display = 'none';
+            products.forEach(renderCard);
+        }
+
+        // --- API Interaction ---
+
+        async function fetchInitialProducts() {
+            try {
+                const response = await fetch(`${BASE_URL}/products`);
+                if (!response.ok) throw new Error("Failed to load products.");
+                
+                const data = await response.json();
+                totalCountEl.textContent = data.total_count;
+                // Initial load: 10 cards displayed
+                renderProducts(data.products); 
+            } catch (error) {
+                messageEl.textContent = `Error: ${error.message}`;
+            }
+        }
+
+        async function performSearch() {
+            const query = searchInput.value.trim();
+            searchBtn.disabled = true;
+            messageEl.textContent = "Searching...";
+            messageEl.style.display = 'block';
+
+            try {
+                const response = await fetch(`${BASE_URL}/search`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: query })
+                });
+                
+                if (!response.ok) throw new Error("Search request failed.");
+                
+                const data = await response.json();
+                
+                if (!query) {
+                    // If the user clears the search, show the initial 10 again
+                    renderProducts(data.results, false); 
+                    messageEl.style.display = 'none';
+                } else {
+                    renderProducts(data.results, true);
+                    messageEl.textContent = `Found ${data.results.length} relevant products.`;
+                }
+
+            } catch (error) {
+                messageEl.textContent = `Search Error: ${error.message}`;
+                renderProducts([], true); // Clear results on error
+            } finally {
+                searchBtn.disabled = false;
+            }
+        }
+
+        // --- Event Listeners & Initialization ---
+
+        searchBtn.addEventListener('click', performSearch);
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        });
+
+        // Event to reset when search bar is empty
+        searchInput.addEventListener('input', () => {
+            if (searchInput.value.trim() === '') {
+                performSearch(); // Re-sends an empty query, which returns the initial 10
+            }
+        });
+
+        fetchInitialProducts();
+
+    </script>
+</body>
+</html>
